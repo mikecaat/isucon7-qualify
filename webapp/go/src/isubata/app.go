@@ -27,6 +27,7 @@ import (
 
 const (
 	avatarMaxBytes = 1 * 1024 * 1024
+	iconDir        = "/home/isucon/icons/"
 )
 
 var (
@@ -208,6 +209,7 @@ func getInitialize(c echo.Context) error {
 	db.MustExec("DELETE FROM channel WHERE id > 10")
 	db.MustExec("DELETE FROM message WHERE id > 10000")
 	db.MustExec("DELETE FROM haveread")
+	_dumpIcon()
 	return c.String(204, "")
 }
 
@@ -662,9 +664,8 @@ func postProfile(c echo.Context) error {
 	}
 
 	if avatarName != "" && len(avatarData) > 0 {
-		_, err := db.Exec("INSERT INTO image (name, data) VALUES (?, ?)", avatarName, avatarData)
-		if err != nil {
-			return err
+		if err := ioutil.WriteFile(iconDir+avatarName, avatarData, 0644); err != nil {
+			fmt.Println(err)
 		}
 		_, err = db.Exec("UPDATE user SET avatar_icon = ? WHERE id = ?", avatarName, self.ID)
 		if err != nil {
@@ -708,6 +709,48 @@ func getIcon(c echo.Context) error {
 	return c.Blob(http.StatusOK, mime, data)
 }
 
+func existsDir(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
+}
+
+type Image struct {
+	Name string `json:"-" db:"name"`
+	Data []byte `json:"-" db:"data"`
+}
+
+func _dumpIcon() error {
+	if existsDir(iconDir) {
+		if err := os.RemoveAll(iconDir); err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	if err := os.MkdirAll(iconDir, 0777); err != nil {
+		fmt.Println(err)
+	}
+
+	images := []Image{}
+	err := db.Select(&images, "SELECT name, data FROM image")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	for _, i := range images {
+		if err := ioutil.WriteFile(iconDir+i.Name, i.Data, 0644); err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	return nil
+}
+
+func dumpIcon(c echo.Context) error {
+	_dumpIcon()
+	return c.String(204, "")
+}
+
 func tAdd(a, b int64) int64 {
 	return a + b
 }
@@ -721,6 +764,8 @@ func tRange(a, b int64) []int64 {
 }
 
 func main() {
+	_dumpIcon()
+
 	e := echo.New()
 	funcs := template.FuncMap{
 		"add":    tAdd,
@@ -754,7 +799,8 @@ func main() {
 
 	e.GET("add_channel", getAddChannel)
 	e.POST("add_channel", postAddChannel)
-	e.GET("/icons/:file_name", getIcon)
+	//e.GET("/icons/:file_name", getIcon)
+	e.GET("/icons/dump", dumpIcon)
 
 	e.Start(":5000")
 }
